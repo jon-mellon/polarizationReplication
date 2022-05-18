@@ -1,0 +1,325 @@
+---
+title: Correlation with Time *Still* Explains the Relationship between Survey Nonresponse and Mass Polarization
+author: "Jonathan Mellon and Christopher Prosser"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+ bookdown::pdf_document2:
+  latex_engine: xelatex
+  keep_tex: true
+  template: titlepage.tex
+ bookdown::word_document2:
+  latex_engine: xelatex
+  keep_tex: true
+  template: titlepage.tex
+always_allow_html: true
+apsroptions: "bibtex,doublespace,nonblind"
+abstract: "Cavari and Freedman (2022) argue that declining cooperation rates in surveys spuriously inflate the increase in polarization measured among the population. We show that their results rely on estimating linear models using ridge regression rather than OLS (as they had done in previous work). The ridge regression approach aggressively shrinks the linear time trend control variable and allows the cooperation rate varible to act as a noisy proxy for the time trend. Using simulations we show that their ridge regression approach has 89.4%-99.9% chance of producing false positives if there was no true effect. When using appropriate methods,  100-200 times as many observations would be needed to reliably detect the effect sizes claimed by Cavari and Freedman."
+bibliography: "polling.bib"
+wordcount: "`r prettyNum(wordcountaddin::word_count('apsrPolarization.Rmd'), big.mark = ',')`"
+---
+
+<!-- https://www.cambridge.org/core/journals/american-political-science-review/article/abs/survey-nonresponse-and-mass-polarization-the-consequences-of-declining-contact-and-cooperation-rates/9497604E28637FF928CCFD0984F96F86 -->
+
+```{r settings, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, error=FALSE, message = FALSE)
+options(scipen=9999)
+knitr::opts_knit$set(eval.after = "fig.cap")
+# prettyNum(wordcountaddin::word_count("apsrPolarization.Rmd"), big.mark = ",")
+```
+
+```{r}
+load("intermediate data/recalculateddata.rdata")
+source("scripts/functions.R")
+library(knitr)
+library(lmridge)
+library(reshape2)
+library(ggplot2)
+library(mellonMisc)
+library(tidyr)
+```
+
+# Introduction
+
+Americans' political opinions appear more divided along partisan lines than ever before [@campbellPolarizedMakingSense2016; @endersIssuesAffectHow2021]. Indeed partisan polarization has reached deep into Americans' lives with partisanship shaping everything from where people live [@brownMeasurementPartisanSorting2021] to their willingness to follow public health advice [@heglandPartisanPandemicHow2022], and even their sexual, ethnic, and religious identities [@eganIdentityDependentVariable2020]. 
+
+A recent *American Political Science Review* letter by @cavariSurveyNonresponseMass2022 (hereafter CF2) disputes this narrative of ever greater mass polarization. CF2 argue that the continuous decline in survey response rates over the last few decades has exaggerated the increase in mass polarization in the United States--at least for three issue areas[^otherissues]--and that this effect is driven by a reduction in people's willingness to cooperate with interviewers. The logic is that politically engaged respondents will be both more likely to voluntarily participate in surveys and also  more likely to hold politically polarized views. Therefore, increasingly strong self-selection on political engagement could lead to a spurious trend in mass polarization.
+
+Understanding whether the rise in mass polarization (and other similar trends) is a real phenomenon or an artefact of survey methodology is crucial to understanding modern US politics. Studies show that Americans overestimate the extremity of their political opponents' ideologies  [@blatzFalsePolarizationFalse2018; @westfallPerceivingPoliticalPolarization2015]. If mass polarization has not actually risen, political science is actively contributing to this misunderstanding. 
+
+
+[^otherissues]: Cavari and Freedman give reasons why we might expect welfare, civil rights and foreign policy effects to be null or work in the opposite direction, but their core theoretical contribution focuses on lower response/cooperation rates exaggerating polarization trends. 
+
+That letter continued a discussion between two earlier papers. First, a study by @cavariPolarizedMassPolarized2018a (hereafter CF1) argued that falling survey response rates led to a spurious increase in mass polarization. That study used a dataset of 135 surveys and found a negative relationship between a survey's response rate and the level of mass polarization reported in that survey. 
+
+@mellonCorrelationTimeExplains2021 (hereafter MP) critiqued CF1's findings because CF1 failed to account for the possibility of a spurious correlation between response rates and mass polarization. After including a linear time variable, all of the results in CF1 become insignificant, with the direction of the effect often reversing. MP argue that this is theoretically possible because lower response rates do not necessarily increase nonresponse bias. 
+
+CF2 revise the analysis from CF1 in four main ways: first, they separate the response rate variable into contact and cooperation rates. Second, they increase the number of surveys from 135 to 158. Third, they include a linear time trend as a regression control as suggested by MP. Finally, they change from using linear models estimated using OLS to ridge regression. With these changes, CF2 find that higher cooperation rates are associated with lower levels of mass polarization in their surveys for three issue areas. 
+
+CF2 focus their discussion almost entirely on the decision to split response rates into cooperation and contact rates. However, this is not the key difference between their results and the MP/CF1 studies. In fact, table 1 in CF2 shows that they also find significant negative effects of overall response rate, in line with CF1's original results and contradicting the reanalysis by MP.
+
+We show that CF2's new results are driven entirely by the decision to use ridge regression instead of OLS (as they did in their original paper) to estimate their linear models. Indeed CF2's results do not hold up to using many different estimation strategies including OLS, year fixed effects, semi-parametric time curves, or a hierarchical linear model that also includes mean response by year as an additional predictor. 
+
+In other words, the debate between CF2 and MP rests entirely on whether ridge regression is a valid approach for this analysis.
+
+Using simulations, we show that CF2's ridge regression approach has a more than 99% chance of producing false positives if there was no true effect of response rate/cooperation rate. We show how this bias is a direct result of using ridge regression in a context where its assumptions are incorrect. Additionally, we show that CF2's analysis is dramatically underpowered when using reasonable model specifications. They would need 100 to 200 times as many observations to be able to detect effects of the sizes they claim more than 80% of the time. 
+
+The relevance of this critique goes beyond CF2's claims about polarization and survey response rates. Political science has a long history of adopting methods which are prone to generating spurious results. We urge scholars to make sure that they understand the limits of new methods using simulations and avoid methods which are prone to generating false positives. Running simulations does not require extensive mathematical skill but can shed light on the limits of statistical methods. 
+
+# Ridge regression and where to use it
+
+OLS and ridge regression are both approaches for estimating the linear model $y=X\beta + \epsilon$, where Y is a vector, X is a matrix of random variables, $\beta$ is a vector of coefficients and $\epsilon$ is a vector of residuals.
+
+However, OLS and ridge regression diverge in how they choose the vector of $\beta$ values. For OLS, $\beta$ is chosen to minimize the sum of squared residuals which is described by the following cost function:
+
+
+$$
+\sum_{i=1}^{M} (y_i - \hat{y_i})^2 = \sum_{i=1}^{M}{ \bigg (y_i - \sum_{j=0}^{p} \beta_j \cdot X[i, j] } \bigg ) ^2 
+$$
+
+Ridge regression aims to minimize a subtly different cost function:
+
+$$
+\sum_{i=1}^{M} (y_i - \hat{y_i})^2 = \sum_{i=1}^{M}{ \bigg (y_i - \sum_{j=0}^{p} \beta_j \cdot X[i, j] } \bigg ) ^2 + \lambda \sum^p_{j=1} {\beta_j}^2
+$$
+
+The difference is that ridge regression is attempting to minimize a combination of the sum of squared residuals and the penalty term:
+
+$$\lambda \sum^p_{j=1} {\beta_j}^2$$
+
+which penalizes larger coefficients. The size of this penalty increases as the constant, $\lambda$ increases. Importantly, the size of the penalty is the square of the coefficient size, so if coefficient A is twice the magnitude of coefficient B, A contributes 4 times as large a penalty as B. 
+
+
+# CF2's results rest on the decision to use ridge regression
+
+To check whether the new significant results reflect new information available in the updated dataset or the choice of ridge regression as a modelling specification, we reproduce CF2's analysis using their original ridge regression approach and a standard OLS estimator (in line with CF1 and MP). 
+
+CF2 analyze the relationship between survey response/cooperation rate and partisan polarization for survey questions asked by Pew between 2004 and 2018. They operationalize partisan polarization as the absolute Cohen's D coefficient of mean differences between Republican and Democrat identifiers' responses to each question. They group the survey questions into six issues: economy, energy, immigration, civil rights, welfare, and foreign policy, and fit a separate model for each issue. The models control for congressional polarization in that year and a linear time trend. 
+
+CF2's model specification for the response rate models is:
+
+$$
+y_{it} = \beta_0 + \beta_1 rr_{it}  +  \beta_2 year_{t} + \beta_3 congress_t + \epsilon_{it}
+$$
+
+The first two rows of table \@ref(tab:rrridgevols) shows CF2's results for each issue area for the response rate and cooperation rate models. In both cases, CF2 find the theorized significant negative coefficients for the economy, energy and immigration. 
+
+The next two rows of table \@ref(tab:rrridgevols) shows the coefficients for the same linear model but estimated using OLS instead of ridge regression. Every single one of the significant negative coefficients becomes either insignificant or significant in the opposite direction when the model is estimated using OLS. 
+
+We also show three additional model specifications for controlling for the time trend in the data. We fit a year fixed-effects model with a separate dummy $\alpha_t$ for each year in the data. 
+
+$$
+y_{it} = \beta_1 rr_{it}  +  \beta_3 congress_t + \alpha_t + \epsilon_{it}
+$$
+
+We also estimate a year random intercepts model, which includes random intercepts, $\gamma_t$, for each year. Additionally, we include the mean of the response rate $\bar{rr}_{t}$ as a predictor in order to satisfy the requirement of conditional independence of fixed and random components of the model [@bafumiFittingMultilevelModels2007]:
+
+$$
+y_{it} = \beta_1 rr_{it}  +  \beta_3 congress_t + \gamma_t + \beta_4 \bar{rr}_{t} +  \epsilon_{it}
+$$
+Finally, we control for time using a generalized additive model (GAM) with a smoothed term $S(year_{t})$ for year. 
+
+$$
+y_{it} = \beta_0 + \beta_1 rr_{it}  +  S(year_{t}) + \beta_3 congress_t + \epsilon_{it}
+$$
+
+<!-- [^olsnote]: In order to simplify the comparison we estimated the OLS models using the lmridge package with $\lambda=0$.  -->
+
+
+```{r rrridgevols}
+ols.comparison.resp$Issue <- sapply(strsplit(rownames(ols.comparison.resp), "\\."), function(x) x[1])
+ols.comp.simple <- ols.comparison.resp %>%
+  slct(Model, Issue, Estimate = est.present)
+rownames(ols.comp.simple) <- NULL
+ols.comp.simple <- ols.comp.simple %>% 
+  pivot_wider(names_from = Issue, values_from= Estimate)
+
+ols.comparison.both$Issue <- sapply(strsplit(rownames(ols.comparison.both), "\\."), function(x) x[1])
+
+ols.comp.simple.b <- ols.comparison.both %>%
+  slct(Model, Issue, Estimate = est.present)
+rownames(ols.comp.simple.b) <- NULL
+ols.comp.simple.b <- ols.comp.simple.b %>% 
+  pivot_wider(names_from = Issue, values_from= Estimate)
+
+ols.comp.simple.comb <- rbind(data.frame(Predictor = "Response",
+                                         ols.comp.simple),
+                              data.frame(Predictor = "Cooperation",
+                                         ols.comp.simple.b))
+ols.comp.simple.comb$Model[ols.comp.simple.comb$Model=="OLS (time trend)"] <- "OLS"
+ols.comp.simple.comb$Model[ols.comp.simple.comb$Model=="GAM time trend"] <- "GAM"
+
+ols.comp.simple.comb$Model[ols.comp.simple.comb$Model=="Year REs"] <- "REs"
+ols.comp.simple.comb$Model[ols.comp.simple.comb$Model=="Year FEs"] <- "FEs"
+ols.comp.simple.comb$Model <- factor(ols.comp.simple.comb$Model,
+                                     levels = c("Ridge", "OLS", "FEs", "REs", "GAM"))
+library(dplyr)
+ols.comp.simple.comb <- ols.comp.simple.comb %>% arrange(Model, Predictor)
+colnames(ols.comp.simple.comb)[colnames(ols.comp.simple.comb)=="Civil.rights"] <- 'Civil rights'
+library(kableExtra)
+kable(ols.comp.simple.comb, 
+      caption = "Response rate models for CF2's ridge regression and equivalent models estimated with OLS (with a linear time trend), OLS with year fixed effects, year random intercepts (and year mean of predictor variable) and a smoothed time trend fitted with a GAM.", booktabs = T) %>%
+  kable_styling(font_size = 11)
+```
+
+In every case, the response rate/cooperation rate coefficient in the alternate model specifications is either insignificant at the 5% level or significant in the wrong direction. Taken together, these results show that the difference between CF2's results and MP are down to the decision to use ridge regression rather than OLS. If CF2 had used the same linear model estimator as they did in their first paper, none of their findings would be significant in the theoretically predicted direction. Additionally, other plausible approaches to accounting for time trends fail to reproduce CF2's results. 
+
+
+
+# Ridge regression false positive rates
+
+For a method to be relied on for inference, it needs to correctly identify a null effect when there is no real effect present and identify a true effect when it is present. To test whether the ridge regression method can identify a true null, we first fit an OLS not including the response rate effects. This gives us a null model of the polarization process where the response rate term is exactly zero. We use this null model to  simulate 1,000 datasets for each of CF2's models based on the observed values of the independent variables and a random error term. This means that the simulations account for the actual correlation structure in CF2's data. 
+
+
+Table \@ref(tab:falsepos) shows the percentage of simulations from the null model where CF2's ridge regression approach returns a significant result. A reliable approach should only find an effect of response rate in this simulated data 5% of the time because the dependent variable was simulated from a model with zero response rate effect. However, we actually observe significant results more than 99% of the time for the energy, immigration and foreign policy models for response/cooperation rate and false positive rates of around 90% for the economy. This simulation indicates that CF2's modelling approach almost guarantees that they will erroneously attribute the effect of the time trend to the response rate variable. The expected rate of false positives is lower (but still above an acceptable level) for civil rights and welfare. This exactly matches the results reported by CF2 who find  null results for these issue areas. 
+
+In short, CF2's results exactly match what we would expect to see if there was no true effect of response rate or cooperation rate on mass polarization and the results were driven entirely by a time trend. 
+
+
+```{r falsepos}
+rownames(falsepos.comb) <- gsub("\\.TRUE", "", rownames(falsepos.comb))
+library(knitr)
+kable(round(falsepos.comb * 100, 1),
+      caption = "\\% of 1,000 simulations with zero response rate/cooperation rate effect where ridge regression finds significant results at 5\\% level.",
+      booktabs = T,   linesep = "")
+```
+
+# Why does ridge regression produce false positives?
+
+Ridge regression is most commonly used for predictive models to avoid over-fitting, particularly where there are many correlated predictors relative to the number of observations. For certain problems and a suitable value of $\lambda$, ridge regression can substantially reduce the mean absolute error of predictions [@draperAppliedRegressionAnalysis1998]. This has made it a useful for certain prediction problems such as machine learning [@carneiroRidgeRegressionEnsemble2022] and creating polygenic risk scores [@devlamingCurrentFutureUse2015; @arashiRidgeRegressionIts2021].
+
+However, ridge regression does not uniformly outperform OLS. The squared penalty term in the cost function means that ridge regression does not simply mechanically shrink all coefficients towards zero but will differentially penalize the largest coefficients. Ridge regression encodes a strong prior expectation that:
+
+> smaller values (in modulus, i.e., in size ignoring sign) of the $\beta_F$ are more likely than larger values, and that larger and larger values of the $\beta_F$ are more and more unlikely [@draperAppliedRegressionAnalysis1998]
+
+## Is the assumption that time trends are small plausible in social science?
+
+So is it likely that a time trend coefficient is small in a social science study? To answer this, we look to a commonly used source of social science data: the General Social Survey (GSS). We took the yearly mean of binary, ordinal or continuous variables that had been asked in more than 15 years. We then correlated these yearly means against time. Figure \@ref(fig:gsscorhist) shows a histogram of these correlations. Far from clustering close to zero, the distribution is bimodal with more correlations close to each extreme. The mean absolute correlation between time and each variable is `r round(mean(abs(cors$Correlation)), 2)`. A model that builds in the assumption that time trends are small does not reflect the realities of social science data.
+
+As the GSS analysis demonstrates, social science variables usally substantially correlate with time. Therefore, the assumption that a particular variable will not have a time trend is anti-conservative in practice, as it will shrink the time trend and allow other variables to incorrectly use that variance instead.
+
+```{r}
+hist.caption <- paste("Correlations between year and", nrow(cors), "time trends from the General Social Survey")
+```
+
+
+```{r gsscorhist, fig.cap = hist.caption, fig.height = 2}
+library(ggplot2)
+library(mellonMisc)
+
+ggplot(cors, aes(x = Correlation)) + 
+  geom_histogram(fill = "lightgray", colour = "black") + theme_bes()
+
+# mydata.econ.r
+random.cors <- replicate(1000, cor(1:20, rnorm(20)))
+# hist(random.cors)
+```
+
+## The bias ridge regression introduces when the assumptions are not fulfilled
+
+A simple simulation demonstrates how badly ridge regression performs when the assumption of small effects does not hold. We simulate 150 observations of three variables using the following definitions: 
+
+```{r, echo = F}
+load("intermediate data/ridgesim.rdata")
+```
+
+$X \sim normal(0,1)$
+
+$Y \sim normal(X, 1)$
+
+$Z \sim normal(-X_i, 1)$
+
+We then want to estimate the linear model:
+
+$Y= \alpha + \beta_1 X + \beta_2 Z + \epsilon$
+
+We know from the simulation that $X$'s coefficient $\beta_1=1$ and that $Z$'s coefficient $\beta_2=0$. OLS estimation gives $\beta_1=$ `r round(ols.simple$coefficients["x"],2)` and $\beta_2=$ `r round(ols.simple$coefficients["z"],2)`. This is close to the correct estimates for both coefficients and the 95% confidence intervals for both coefficients include the true values.
+
+Figure \@ref(fig:ridgesimplesim) shows the coefficients for $X$ and $Z$ in ridge regressions with different values of $\lambda$. Even with low values of $\lambda$, the coefficient on $X$ is heavily penalized and shrinks sharply towards zero as $\lambda$ increases. However, the coefficient on $Z$ (which should have zero effect) becomes negative and significant (since $X$ and $Z$ are negatively correlated) as $\lambda$ increases. Even though $Z$ has no causal relationship to $Y$, its coefficient increases in magnitude and becomes significant because $Z$ acts as a noisy proxy for $X$ and the model penalizes increases in the magnitude of $Z$'s coefficient less than increases in $X$'s coefficient.
+
+
+```{r ridgesimplesim, fig.cap  ="Coefficients for $X$ and $Z$ in simulated data using ridge regression with different values of $\\lambda$. Horizontal dashed lines show the simulated value of the coefficients on $X$ and $Z$. $\\lambda=0$ is equivalent to OLS. 95% CIs shown in shaded area.", fig.height = 3, cache = F}
+
+ridge.sum$variable <- factor(ridge.sum$variable, levels =c("z", "x"))
+ggplot(ridge.sum, aes(x = K, y = est, 
+                      group = variable, colour = variable, 
+                      linetype = variable,
+                      fill = variable,
+                      ymin = lci, ymax = uci)) + 
+  geom_line() + 
+  geom_hline(yintercept = 1, 
+             colour = "#00c317", linetype = 5) + 
+  geom_hline(yintercept = 0,
+             colour = "#1F85DE", linetype = 5) + 
+  xlab(xl) + 
+  scale_color_manual(values = c("#1F85DE", "#00c317")) + 
+  theme_bes() + ylab("Ridge regression coefficient") + 
+  geom_ribbon(alpha = 0.1, colour = NA) + 
+  scale_fill_manual(values = c("#1F85DE", "#00c317")) 
+
+```
+
+
+The tendency of ridge regression to inflate the coefficients of previously non-significant coefficients has been recognized as undesirable behavior by statisticians. For instance, @draperAppliedRegressionAnalysis1998 say that:
+
+> An additional worrying feature of ridge regression is the following. The characteristic effect of the ridge regression procedures is to change (from the least squares values) the nonsignificant estimated regression coefficients (whose values are statistically doubtful, anyway) to a far greater extent than the significant estimated coefficients. It is questionable that much real improvement in estimation can be achieved by such a procedure. 
+
+The inflation of an effect that was non-significant when estimated using OLS is exactly the pattern we observe in CF2's results. Figure \@ref(fig:lambdaplot) shows the equivalent plot for CF2's estimates of the economy, energy, and immigration response rate effects.[^othereffs] The pattern for the response rate effect matches that seen in the simulation in figure \@ref(fig:ridgesimplesim) where $Z$ had no real effect. 
+
+[^othereffs]: The cooperation effects show the same pattern. 
+
+
+```{r lambdaplot, fig.cap = "Ridge regression estimates of the response rate coefficient for economy, energy and civil rights issue areas for different values of $\\lambda$. Vertical dashed line shows value of $\\lambda$ used by CF2.", fig.height = 8.5}
+library(gridExtra)
+
+k.plot.r.comb <- grid_arrange_shared_legend(k.plot.r$Economy,
+                                            k.plot.r$Energy,
+                                            k.plot.r$Immigration,
+                                            nrow = 3, ncol = 1)
+k.plot.b.comb <- grid_arrange_shared_legend(k.plot.b$Economy,
+                                            k.plot.b$Energy,
+                                            k.plot.b$Immigration,
+                                            nrow = 3, ncol = 1)
+
+plot(k.plot.r.comb)
+```
+
+
+# Can we conclude that response rates do not affect polarization?
+
+So far we have demonstrated that CF2's use of ridge regression is not appropriate for the problem they are addressing, that their results disappear if OLS is used, and that the use of ridge regression nearly guarantees false positives. But can we use the OLS models to conclude that response/contact rates do not affect mass polarization?
+
+To test the statistical power available in CF2's data to detect the effect sizes they claim, we simulate new values of the dependent variable using the coefficients and RMSE from the CF2's models. We then estimate the linear model on the simulated data using OLS and record the p-value for the response rate/cooperation rate effect. Additionally, in order to estimate how large a sample would be needed to reliably detect these effects, we duplicate the dataset multiple times prior to simulating new values of the dependent variable. This means that the expanded dataset maintains the correlation structure of the independent variables in CF2's original data. 
+
+Table \@ref(tab:powercombined) shows the proportion of the time that an OLS model would find a significant result at the 5% level if the linear models that CF2 estimate represented the true data generating process.  The sample-size-multiple column shows how many times CF2's observations were used in the simulation. With CF2's actual available sample size, we would expect to detect a true effect only slightly more than 5% of the time, the same level we would expect merely by chance. It is only when we reach sample sizes 100-200 times larger than CF2's that the power exceeds the conventional 80% threshold. 
+
+```{r powercombined}
+colnames(comb.power)[colnames(comb.power)=="Sample size multiple"] <- "Sample size"
+comb.power$`Sample size` <- paste0(comb.power$`Sample size`, "X")
+
+
+kable(comb.power[, c("Sample size", "Variable", "Economy", "Energy", "Immigration")], 
+      caption = "Power for an OLS model to detect a statistically significant effect if the models presented by CF2 are the true data generating process.", 
+      booktabs = T,  linesep = ""
+)
+```
+
+Three factors contribute to the extremely low power in CF2's study. First, their sample size is small at just `r nrow(issues.inputs.r$Economy$data)` observations for most models. While each of these represent an entire survey, statistical models do not care what the unit of analysis represents.
+
+Second, CF2's claimed effect sizes are small. While they present their coefficients in scaled correlation form, the size of the effects is clearer when we convert them back to an interpretable scale. For the three issues CF2 focus on (economy, energy and immigration) a one standard deviation fall in response rates are associated with a `r abs(round(max(relevant.ests), 2))` to `r abs(round(min(relevant.ests), 2))` standard deviation rise in mass polarization. 
+
+Finally, as CF2 acknowledge, they are trying to fit models with highly collinear variables. Across the three key issues and cooperation/response rate models, the variance inflation factor ranges from `r round(min(relevant.vifs), 1)` to `r round(max(relevant.vifs), 1)` meaning that the standard errors of the key coefficients are between `r round(min(sqrt(relevant.vifs)),1)` and `r round(max(sqrt(relevant.vifs)),1)` times larger than they would be if the predictors were completely orthogonal.
+
+We are therefore not making a claim about whether response rates affect mass polarization. We merely claim that 1) CF2's apparent evidence is driven by using an inappropriate model and 2) CF2's data is insufficient to test for effects of the size they claim. 
+
+# Conclusions
+
+@cavariSurveyNonresponseMass2022 argue that much of the trend in mass polarization is a fiction created by the declining quality of surveys. However, the evidence presented is too flawed to support this conclusion. If declining response and cooperation rates had no effect on mass polarization we would expect to see exactly the pattern of results they report as the ridge regression estimator they use is almost guaranteed to create false positives. When analysed appropriately, the data CF2 present are too underpowered to say anything about the relationship between polarization and response/cooperation rates.[^causalproblems]
+
+[^causalproblems]: One additional concern is that there is every reason to think there could be additional omitted variables. CF2 use causal language and are implicitly following a selection-on-observables design, but it is hard to plausibly claim that the very limited set of controls included account for all the relevant variables.  
+
+Social scientists often use complex methods to extract the maximum available information out of limited data. However, these methods often embed opaque assumptions about the world and the data which may not be apparent even to the statisticians who created them. Simulations are a vital tool for detecting whether a particular method is capable of distinguishing real and null findings in a particular applied case.
+
+\newpage
+
+# References
+
